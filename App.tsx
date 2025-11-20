@@ -24,23 +24,33 @@ const App: React.FC = () => {
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    try {
-      const ai = new GoogleGenAI({apiKey: process.env.API_KEY!});
-      const chatSession = ai.chats.create({
-        model: 'gemini-2.5-flash',
-        config: {
-          systemInstruction: 'You are a helpful and friendly AI assistant. Format your responses using Markdown, especially for code blocks.',
-        },
-      });
-      setChat(chatSession);
-    } catch (e) {
+    const initAI = async () => {
+      try {
+        const apiKey = process.env.API_KEY;
+        if (!apiKey) {
+            setError('API_KEY is missing in the environment variables.');
+            return;
+        }
+
+        const ai = new GoogleGenAI({ apiKey });
+        const chatSession = ai.chats.create({
+          model: 'gemini-2.5-flash',
+          config: {
+            systemInstruction: 'You are a helpful and friendly AI assistant. Format your responses using Markdown, especially for code blocks.',
+          },
+        });
+        setChat(chatSession);
+      } catch (e) {
         if (e instanceof Error) {
             setError(e.message);
         } else {
             setError('An unknown error occurred during initialization.');
         }
         console.error("Initialization error:", e);
-    }
+      }
+    };
+    
+    initAI();
   }, []);
 
   useEffect(() => {
@@ -100,7 +110,7 @@ const App: React.FC = () => {
       <Sidebar />
       <div className="flex-1 flex flex-col relative">
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10">
-            <button className="flex items-center gap-2 bg-purple-600/80 text-white text-sm py-2 px-4 rounded-full hover:bg-purple-700 transition-colors">
+            <button className="flex items-center gap-2 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white text-sm font-medium py-2 px-4 rounded-full hover:opacity-90 transition-opacity shadow-lg shadow-purple-500/20">
                 <UpgradeIcon className="w-4 h-4" />
                 Upgrade for free
             </button>
@@ -132,7 +142,7 @@ const App: React.FC = () => {
         )}
         
         {error && (
-            <div className="absolute w-full bottom-0 p-4 bg-red-800 text-white text-center text-sm">
+            <div className="absolute w-full bottom-0 p-4 bg-red-800 text-white text-center text-sm z-20">
                 {error}
             </div>
         )}
