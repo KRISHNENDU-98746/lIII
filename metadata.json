@@ -1,0 +1,7 @@
+{
+  "name": "Gemini Chat",
+  "description": "A responsive chat application powered by the Google Gemini API, designed to mimic the conversational experience of ChatGPT. It features a clean, dark-themed interface, real-time streaming responses, and Markdown rendering for code snippets.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
