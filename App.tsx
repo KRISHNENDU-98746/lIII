@@ -26,9 +26,11 @@ const App: React.FC = () => {
   useEffect(() => {
     const initAI = async () => {
       try {
+        // The API key is securely obtained from the environment variable.
         const apiKey = process.env.API_KEY;
+        
         if (!apiKey) {
-            setError('API_KEY is missing in the environment variables.');
+            setError('API Key not found. Please ensure process.env.API_KEY is set in your project environment.');
             return;
         }
 
@@ -77,15 +79,17 @@ const App: React.FC = () => {
       
       let accumulatedText = '';
       for await (const chunk of stream) {
-        accumulatedText += chunk.text;
-        setMessages(prev => {
-          const newMessages = [...prev];
-          const lastMessage = newMessages[newMessages.length - 1];
-          if (lastMessage && lastMessage.role === 'model') {
-            newMessages[newMessages.length - 1] = { ...lastMessage, content: accumulatedText };
-          }
-          return newMessages;
-        });
+        if (chunk.text) {
+            accumulatedText += chunk.text;
+            setMessages(prev => {
+            const newMessages = [...prev];
+            const lastMessage = newMessages[newMessages.length - 1];
+            if (lastMessage && lastMessage.role === 'model') {
+                newMessages[newMessages.length - 1] = { ...lastMessage, content: accumulatedText };
+            }
+            return newMessages;
+            });
+        }
       }
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred.';
