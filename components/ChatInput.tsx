@@ -1,55 +1,8 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { SendIcon } from './icons/SendIcon';
 import { PlusIcon } from './icons/PlusIcon';
 import { MicrophoneIcon } from './icons/MicrophoneIcon';
-
-// Web Speech API Types
-interface SpeechRecognitionResult {
-  readonly isFinal: boolean;
-  readonly length: number;
-  item(index: number): SpeechRecognitionAlternative;
-  [index: number]: SpeechRecognitionAlternative;
-}
-
-interface SpeechRecognitionResultList {
-  readonly length: number;
-  item(index: number): SpeechRecognitionResult;
-  [index: number]: SpeechRecognitionResult;
-}
-
-interface SpeechRecognitionEvent extends Event {
-  readonly resultIndex: number;
-  readonly results: SpeechRecognitionResultList;
-}
-
-interface SpeechRecognitionAlternative {
-  readonly transcript: string;
-  readonly confidence: number;
-}
-
-interface SpeechRecognitionErrorEvent extends Event {
-  readonly error: string;
-  readonly message: string;
-}
-
-interface SpeechRecognition extends EventTarget {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  start(): void;
-  stop(): void;
-  onstart: () => void;
-  onresult: (event: SpeechRecognitionEvent) => void;
-  onend: () => void;
-  onerror: (event: SpeechRecognitionErrorEvent) => void;
-}
-
-declare global {
-  interface Window {
-    SpeechRecognition: new () => SpeechRecognition;
-    webkitSpeechRecognition: new () => SpeechRecognition;
-  }
-}
 
 interface ChatInputProps {
   onSendMessage: (message: string, image?: string) => void;
@@ -61,84 +14,44 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading, variant
   const [text, setText] = useState('');
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
-  const [speechError, setSpeechError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      console.warn("Speech recognition not supported in this browser.");
-      return;
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => setIsRecording(true);
+      recognition.onend = () => setIsRecording(false);
+      recognition.onresult = (event: any) => {
+        const transcript = Array.from(event.results)
+          .map((result: any) => result[0])
+          .map((result: any) => result.transcript)
+          .join('');
+        setText(transcript);
+      };
+
+      recognitionRef.current = recognition;
     }
-
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
-
-    recognition.onstart = () => {
-      setIsRecording(true);
-      setSpeechError(null);
-    };
-    
-    recognition.onend = () => {
-      setIsRecording(false);
-    };
-    
-    recognition.onresult = (event) => {
-      const transcript = Array.from(event.results)
-        .map(result => result[0])
-        .map(result => result.transcript)
-        .join('');
-      
-      setText(transcript);
-      
-      // Auto-focus and scroll textarea as text grows
-      if (textareaRef.current) {
-        textareaRef.current.focus();
-      }
-    };
-
-    recognition.onerror = (event) => {
-        console.error("Speech recognition error:", event.error);
-        if (event.error === 'not-allowed') {
-            setSpeechError("Microphone access denied. Enable it in settings.");
-        } else if (event.error === 'network') {
-            setSpeechError("Network error during speech recognition.");
-        }
-        setIsRecording(false);
-    };
-
-    recognitionRef.current = recognition;
-
-    return () => {
-        recognitionRef.current?.stop();
-    };
   }, []);
 
-  // Sync textarea height with text content (especially useful for transcription)
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
-      const scrollHeight = textareaRef.current.scrollHeight;
-      textareaRef.current.style.height = `${scrollHeight}px`;
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
     }
   }, [text]);
   
   const handleSubmit = () => {
-    if (isRecording) {
-      recognitionRef.current?.stop();
-    }
-    
     if ((text.trim() || imagePreview) && !isLoading) {
       onSendMessage(text.trim(), imagePreview ?? undefined);
       setText('');
       setImagePreview(null);
-      if(fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
     }
   };
 
@@ -153,42 +66,36 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading, variant
     const file = event.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagePreview(reader.result as string);
-      };
+      reader.onloadend = () => setImagePreview(reader.result as string);
       reader.readAsDataURL(file);
     }
   };
   
-  const handleRemoveImage = () => {
-      setImagePreview(null);
-      if(fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-  };
-  
-  const handleToggleRecording = () => {
-    if (!recognitionRef.current) {
-        setSpeechError("Speech recognition not supported.");
-        return;
-    };
-    
+  const toggleRecording = () => {
     if (isRecording) {
-      recognitionRef.current.stop();
+      recognitionRef.current?.stop();
     } else {
-      recognitionRef.current.start();
+      recognitionRef.current?.start();
     }
-  };
-  
-  const baseClasses = "flex items-center w-full bg-zinc-800/80 border border-zinc-700 transition-all duration-200 focus-within:border-indigo-500 shadow-xl";
-  const variantClasses = {
-      initial: `rounded-full p-4 text-lg`,
-      chat: `rounded-2xl p-2 text-base`
   };
 
   return (
-    <div className="w-full max-w-4xl mx-auto px-2">
-        <div className={`${baseClasses} ${variantClasses[variant]}`}>
+    <div className="w-full relative">
+        {imagePreview && (
+            <div className="absolute bottom-full left-0 mb-4 p-2 bg-zinc-800 rounded-2xl border border-zinc-700 shadow-2xl animate-in fade-in slide-in-from-bottom-2 duration-200">
+                <div className="relative group">
+                  <img src={imagePreview} alt="Selected preview" className="max-h-32 rounded-xl object-contain shadow-sm" />
+                  <button 
+                    onClick={() => setImagePreview(null)} 
+                    className="absolute -top-2 -right-2 bg-zinc-900 text-white border border-zinc-700 rounded-full w-6 h-6 flex items-center justify-center hover:bg-zinc-800 transition-all shadow-lg"
+                  >
+                    &times;
+                  </button>
+                </div>
+            </div>
+        )}
+
+        <div className="flex items-end w-full bg-[#2f2f2f] border border-white/5 rounded-[26px] p-2 pr-3 transition-all focus-within:ring-1 focus-within:ring-white/10 shadow-lg">
             <input
                 type="file"
                 ref={fileInputRef}
@@ -199,8 +106,8 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading, variant
             
             <button
                 onClick={() => fileInputRef.current?.click()}
-                disabled={isLoading || isRecording}
-                className="p-2.5 rounded-full text-zinc-400 disabled:opacity-30 hover:text-white hover:bg-zinc-700/50 transition-all"
+                disabled={isLoading}
+                className="p-2 mb-0.5 rounded-full text-zinc-400 hover:text-white hover:bg-white/5 transition-all"
                 aria-label="Attach file"
             >
                 <PlusIcon className="w-5 h-5" />
@@ -211,59 +118,38 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading, variant
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={isRecording ? "Listening..." : (variant === 'initial' ? "Ask anything..." : "Message Gemini...")}
-                className="flex-1 bg-transparent border-none focus:ring-0 text-zinc-100 placeholder-zinc-500 resize-none max-h-60 py-2.5 scrollbar-hide"
+                placeholder="Message Gemini..."
+                className="flex-1 bg-transparent border-none focus:ring-0 text-white placeholder-zinc-500 resize-none py-2.5 px-3 max-h-60 scrollbar-hide text-[15px] leading-relaxed"
                 rows={1}
                 disabled={isLoading}
             />
 
-             <div className="relative flex items-center justify-center mr-1">
-                {isRecording && (
-                    <span className="absolute inset-0 rounded-full bg-red-500/20 animate-ping scale-150"></span>
-                )}
+            <div className="flex items-center gap-1.5 mb-0.5">
                 <button
-                    onClick={handleToggleRecording}
+                    onClick={toggleRecording}
                     disabled={isLoading}
-                    className={`p-2.5 rounded-full transition-all duration-300 flex items-center justify-center ${
+                    className={`p-2 rounded-full transition-all ${
                         isRecording 
-                        ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' 
-                        : 'text-zinc-400 hover:text-white hover:bg-zinc-700/50 disabled:opacity-30'
+                        ? 'bg-red-500 text-white animate-pulse' 
+                        : 'text-zinc-400 hover:text-white hover:bg-white/5'
                     }`}
-                    aria-label={isRecording ? 'Stop recording' : 'Start voice input'}
                 >
-                    <MicrophoneIcon className={`w-5 h-5 ${isRecording ? 'animate-pulse' : ''}`} />
+                    <MicrophoneIcon className="w-5 h-5" />
                 </button>
-            </div>
 
-            {(variant === 'chat' || text.trim() || imagePreview) && (
                 <button
                     onClick={handleSubmit}
                     disabled={isLoading || (!text.trim() && !imagePreview)}
-                    className="p-2.5 rounded-xl bg-indigo-600 text-white disabled:bg-zinc-700 disabled:text-zinc-500 disabled:cursor-not-allowed hover:bg-indigo-500 transition-all shadow-lg active:scale-95"
-                    aria-label="Send message"
+                    className={`p-2 rounded-full transition-all ${
+                        (text.trim() || imagePreview) && !isLoading
+                        ? 'bg-white text-black hover:bg-zinc-200'
+                        : 'bg-zinc-600 text-zinc-400 cursor-not-allowed opacity-50'
+                    }`}
                 >
-                    <SendIcon className="w-5 h-5" />
-                </button>
-            )}
-        </div>
-        
-        {imagePreview && (
-            <div className="mt-4 p-2 relative w-fit group bg-zinc-800 rounded-2xl border border-zinc-700 shadow-2xl">
-                <img src={imagePreview} alt="Selected preview" className="max-h-48 rounded-xl object-contain shadow-sm" />
-                <button 
-                  onClick={handleRemoveImage} 
-                  className="absolute -top-2 -right-2 bg-zinc-900 text-zinc-300 border border-zinc-700 rounded-full w-6 h-6 flex items-center justify-center hover:bg-zinc-800 hover:text-white transition-colors shadow-lg"
-                >
-                  &times;
+                    <SendIcon className="w-5 h-5 fill-current" />
                 </button>
             </div>
-        )}
-
-      {speechError && (
-          <p className="text-[11px] font-medium text-red-400 text-center mt-2 animate-pulse">
-            {speechError}
-          </p>
-      )}
+        </div>
     </div>
   );
 };
