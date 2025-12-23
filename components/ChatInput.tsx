@@ -3,7 +3,7 @@ import { SendIcon } from './icons/SendIcon';
 import { PlusIcon } from './icons/PlusIcon';
 import { MicrophoneIcon } from './icons/MicrophoneIcon';
 
-// Fix: Add types for the Web Speech API to resolve TypeScript errors.
+// Web Speech API Types
 interface SpeechRecognitionResult {
   readonly isFinal: boolean;
   readonly length: number;
@@ -78,23 +78,35 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading, variant
     recognition.interimResults = true;
     recognition.lang = 'en-US';
 
-    recognition.onstart = () => setIsRecording(true);
-    recognition.onend = () => setIsRecording(false);
+    recognition.onstart = () => {
+      setIsRecording(true);
+      setSpeechError(null);
+    };
+    
+    recognition.onend = () => {
+      setIsRecording(false);
+    };
     
     recognition.onresult = (event) => {
       const transcript = Array.from(event.results)
         .map(result => result[0])
         .map(result => result.transcript)
         .join('');
+      
       setText(transcript);
+      
+      // Auto-focus and scroll textarea as text grows
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+      }
     };
 
     recognition.onerror = (event) => {
-        console.error("Speech recognition error:", event.error, event.message);
+        console.error("Speech recognition error:", event.error);
         if (event.error === 'not-allowed') {
-            setSpeechError("Microphone access denied. Please enable it in your browser settings.");
-        } else {
-            setSpeechError(`An error occurred: ${event.error}`);
+            setSpeechError("Microphone access denied. Enable it in settings.");
+        } else if (event.error === 'network') {
+            setSpeechError("Network error during speech recognition.");
         }
         setIsRecording(false);
     };
@@ -106,6 +118,7 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading, variant
     };
   }, []);
 
+  // Sync textarea height with text content (especially useful for transcription)
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -115,6 +128,10 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading, variant
   }, [text]);
   
   const handleSubmit = () => {
+    if (isRecording) {
+      recognitionRef.current?.stop();
+    }
+    
     if ((text.trim() || imagePreview) && !isLoading) {
       onSendMessage(text.trim(), imagePreview ?? undefined);
       setText('');
@@ -152,10 +169,10 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading, variant
   
   const handleToggleRecording = () => {
     if (!recognitionRef.current) {
-        setSpeechError("Speech recognition is not supported in this browser.");
+        setSpeechError("Speech recognition not supported.");
         return;
     };
-    setSpeechError(null);
+    
     if (isRecording) {
       recognitionRef.current.stop();
     } else {
@@ -163,14 +180,14 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading, variant
     }
   };
   
-  const baseClasses = "flex items-center w-full bg-zinc-800/80 border border-zinc-700 transition-colors focus-within:border-purple-500";
+  const baseClasses = "flex items-center w-full bg-zinc-800/80 border border-zinc-700 transition-all duration-200 focus-within:border-indigo-500 shadow-xl";
   const variantClasses = {
-      initial: `rounded-full p-3 text-lg`,
-      chat: `rounded-xl p-2 text-base`
+      initial: `rounded-full p-4 text-lg`,
+      chat: `rounded-2xl p-2 text-base`
   };
 
   return (
-    <div className="w-full">
+    <div className="w-full max-w-4xl mx-auto px-2">
         <div className={`${baseClasses} ${variantClasses[variant]}`}>
             <input
                 type="file"
@@ -179,51 +196,73 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading, variant
                 className="hidden"
                 accept="image/*"
             />
+            
             <button
                 onClick={() => fileInputRef.current?.click()}
-                disabled={isLoading}
-                className="p-2 rounded-full text-zinc-400 disabled:text-zinc-600 hover:text-white transition-colors"
+                disabled={isLoading || isRecording}
+                className="p-2.5 rounded-full text-zinc-400 disabled:opacity-30 hover:text-white hover:bg-zinc-700/50 transition-all"
                 aria-label="Attach file"
             >
-                <PlusIcon className="w-6 h-6" />
+                <PlusIcon className="w-5 h-5" />
             </button>
+
             <textarea
                 ref={textareaRef}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={variant === 'initial' ? "Ask anything" : "Type your message..."}
-                className="flex-1 bg-transparent border-none focus:ring-0 text-zinc-200 placeholder-zinc-500 resize-none max-h-48"
+                placeholder={isRecording ? "Listening..." : (variant === 'initial' ? "Ask anything..." : "Message Gemini...")}
+                className="flex-1 bg-transparent border-none focus:ring-0 text-zinc-100 placeholder-zinc-500 resize-none max-h-60 py-2.5 scrollbar-hide"
                 rows={1}
                 disabled={isLoading}
             />
-             <button
-                onClick={handleToggleRecording}
-                disabled={isLoading}
-                className={`p-2 rounded-full text-zinc-400 disabled:text-zinc-600 hover:text-white transition-colors ${isRecording ? 'text-red-500 animate-pulse' : ''}`}
-                aria-label={isRecording ? 'Stop recording' : 'Start recording'}
-            >
-                <MicrophoneIcon className="w-6 h-6" />
-            </button>
-            {variant === 'chat' && (
+
+             <div className="relative flex items-center justify-center mr-1">
+                {isRecording && (
+                    <span className="absolute inset-0 rounded-full bg-red-500/20 animate-ping scale-150"></span>
+                )}
+                <button
+                    onClick={handleToggleRecording}
+                    disabled={isLoading}
+                    className={`p-2.5 rounded-full transition-all duration-300 flex items-center justify-center ${
+                        isRecording 
+                        ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' 
+                        : 'text-zinc-400 hover:text-white hover:bg-zinc-700/50 disabled:opacity-30'
+                    }`}
+                    aria-label={isRecording ? 'Stop recording' : 'Start voice input'}
+                >
+                    <MicrophoneIcon className={`w-5 h-5 ${isRecording ? 'animate-pulse' : ''}`} />
+                </button>
+            </div>
+
+            {(variant === 'chat' || text.trim() || imagePreview) && (
                 <button
                     onClick={handleSubmit}
                     disabled={isLoading || (!text.trim() && !imagePreview)}
-                    className="ml-2 p-2 rounded-full bg-purple-600 text-white disabled:bg-zinc-600 disabled:cursor-not-allowed hover:bg-purple-700 transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 focus:ring-offset-zinc-900"
+                    className="p-2.5 rounded-xl bg-indigo-600 text-white disabled:bg-zinc-700 disabled:text-zinc-500 disabled:cursor-not-allowed hover:bg-indigo-500 transition-all shadow-lg active:scale-95"
                     aria-label="Send message"
                 >
                     <SendIcon className="w-5 h-5" />
                 </button>
             )}
         </div>
+        
         {imagePreview && (
-            <div className="mt-4 p-2 relative w-fit mx-auto bg-zinc-800 rounded-xl">
-                <img src={imagePreview} alt="Selected preview" className="max-h-40 rounded-lg" />
-                <button onClick={handleRemoveImage} className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-6 h-6 flex items-center justify-center leading-none">&times;</button>
+            <div className="mt-4 p-2 relative w-fit group bg-zinc-800 rounded-2xl border border-zinc-700 shadow-2xl">
+                <img src={imagePreview} alt="Selected preview" className="max-h-48 rounded-xl object-contain shadow-sm" />
+                <button 
+                  onClick={handleRemoveImage} 
+                  className="absolute -top-2 -right-2 bg-zinc-900 text-zinc-300 border border-zinc-700 rounded-full w-6 h-6 flex items-center justify-center hover:bg-zinc-800 hover:text-white transition-colors shadow-lg"
+                >
+                  &times;
+                </button>
             </div>
         )}
+
       {speechError && (
-          <p className="text-xs text-red-400 text-center mt-2">{speechError}</p>
+          <p className="text-[11px] font-medium text-red-400 text-center mt-2 animate-pulse">
+            {speechError}
+          </p>
       )}
     </div>
   );
