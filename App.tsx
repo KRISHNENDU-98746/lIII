@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, Chat, Part } from '@google/genai';
 import type { Message, ChatSession } from './types';
@@ -5,7 +6,6 @@ import ChatMessage from './components/ChatMessage';
 import ChatInput from './components/ChatInput';
 import Sidebar from './components/Sidebar';
 import { UpgradeIcon } from './components/icons/UpgradeIcon';
-// Import GeminiIcon to fix "Cannot find name 'GeminiIcon'" error
 import { GeminiIcon } from './components/icons/GeminiIcon';
 
 const MODELS = {
@@ -19,6 +19,9 @@ const SUGGESTIONS = [
   "Plan a 3-day trip to Tokyo",
   "Explain quantum physics to a 5-year old"
 ];
+
+// Helper to check if window.aistudio is available
+const getAiStudio = () => (window as any).aistudio;
 
 const parseBase64 = (base64String: string): Part => {
   const match = base64String.match(/data:(.*);base64,(.*)/);
@@ -34,6 +37,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [activeChat, setActiveChat] = useState<Chat | null>(null);
+  const [needsKey, setNeedsKey] = useState<boolean>(false);
   
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -49,7 +53,33 @@ const App: React.FC = () => {
         console.error("Failed to parse sessions", e);
       }
     }
+
+    // Check if we have an API key available
+    const checkKey = async () => {
+      const envKey = process.env.API_KEY;
+      if (!envKey) {
+        const aistudio = getAiStudio();
+        if (aistudio) {
+          const hasKey = await aistudio.hasSelectedApiKey();
+          if (!hasKey) setNeedsKey(true);
+        } else {
+          // If not in AI Studio and no ENV key, we'll show the warning
+          setNeedsKey(true);
+        }
+      }
+    };
+    checkKey();
   }, []);
+
+  const handleConnectKey = async () => {
+    const aistudio = getAiStudio();
+    if (aistudio) {
+      await aistudio.openSelectKey();
+      setNeedsKey(false);
+    } else {
+      setError("AI Studio environment not detected. Please ensure process.env.API_KEY is set in Vercel.");
+    }
+  };
 
   // Persistence: Save to localStorage
   useEffect(() => {
@@ -61,7 +91,7 @@ const App: React.FC = () => {
   // Initialize or re-sync chat session when model or active chat changes
   useEffect(() => {
     const initChat = async () => {
-      if (!activeSessionId) {
+      if (!activeSessionId || needsKey) {
         setActiveChat(null);
         return;
       }
@@ -71,12 +101,10 @@ const App: React.FC = () => {
         if (!apiKey) return;
 
         const ai = new GoogleGenAI({ apiKey });
-        
-        // Note: The SDK's Chat maintains history. We pass it on creation.
         const chatSession = ai.chats.create({
           model: currentModel,
           config: {
-            systemInstruction: 'You are Gemini, a highly capable AI assistant developed by Google. You aim to be helpful, concise, and provide high-quality information. Format your responses using beautiful Markdown. If asked to code, provide full, runnable snippets in blocks.',
+            systemInstruction: 'You are Gemini, a highly capable AI assistant developed by Google. Format responses using Markdown.',
           },
         });
         
@@ -87,7 +115,7 @@ const App: React.FC = () => {
     };
 
     initChat();
-  }, [activeSessionId, currentModel]);
+  }, [activeSessionId, currentModel, needsKey]);
 
   useEffect(() => {
     if (chatContainerRef.current) {
@@ -136,7 +164,6 @@ const App: React.FC = () => {
       timestamp: Date.now() 
     };
 
-    // Update session with user message and placeholder for model
     setSessions(prev => prev.map(s => s.id === sid ? {
       ...s,
       messages: [...s.messages, userMsg, { role: 'model', content: '', timestamp: Date.now() }],
@@ -145,15 +172,16 @@ const App: React.FC = () => {
 
     try {
       const apiKey = process.env.API_KEY;
-      const ai = new GoogleGenAI({ apiKey: apiKey! });
-      
-      // Fix: messageParts should be typed as Part[] to match SDK expectations
+      if (!apiKey) {
+        throw new Error("API Key is missing. Please click 'Connect' to set up your key.");
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
       const messageParts: Part[] = [{ text: messageText }];
       if (imageBase64) {
         messageParts.push(parseBase64(imageBase64));
       }
 
-      // Fix: Cast contents to any to resolve complex union type mismatch (PartUnion vs Content)
       const stream = await ai.models.generateContentStream({
         model: currentModel,
         contents: [
@@ -182,12 +210,47 @@ const App: React.FC = () => {
         }
       }
     } catch (e: any) {
-      setError(`Failed to get response: ${e.message || 'Unknown error'}`);
+      if (e.message?.includes("Requested entity was not found")) {
+        setNeedsKey(true);
+        setError("Your API key session expired or is invalid. Please reconnect.");
+      } else {
+        setError(`Error: ${e.message || 'Unknown error'}`);
+      }
       console.error(e);
     } finally {
       setIsLoading(false);
     }
-  }, [activeSessionId, currentModel, sessions]);
+  }, [activeSessionId, currentModel, sessions, needsKey]);
+
+  if (needsKey) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-zinc-950 text-zinc-100 p-6">
+        <div className="max-w-md w-full text-center space-y-6 animate-in fade-in zoom-in duration-500">
+          <div className="bg-zinc-900 p-8 rounded-3xl border border-zinc-800 shadow-2xl flex flex-col items-center">
+            <GeminiIcon className="w-16 h-16 mb-6" />
+            <h1 className="text-2xl font-bold mb-2">Connect to Gemini</h1>
+            <p className="text-zinc-400 text-sm mb-8 leading-relaxed">
+              To use Gemini 3 models, you need to provide an API key. Please connect your paid Google Cloud project.
+            </p>
+            <button 
+              onClick={handleConnectKey}
+              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-lg shadow-indigo-500/20 active:scale-[0.98]"
+            >
+              Connect API Key
+            </button>
+            <a 
+              href="https://ai.google.dev/gemini-api/docs/billing" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-xs text-zinc-500 hover:text-zinc-300 mt-6 underline underline-offset-4 transition-colors"
+            >
+              Learn about Gemini API billing
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-[#0d0d0d] text-zinc-300 font-sans overflow-hidden">
@@ -200,7 +263,6 @@ const App: React.FC = () => {
       />
       
       <div className="flex-1 flex flex-col relative overflow-hidden bg-[#171717]">
-        {/* Header */}
         <header className="h-14 flex items-center justify-between px-6 z-30">
           <div className="flex items-center gap-2">
             <div className="flex bg-zinc-800/50 p-1 rounded-xl border border-zinc-700/50">
@@ -257,7 +319,6 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* Error Message */}
           {error && (
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-red-950 border border-red-900 text-red-200 text-xs rounded-lg shadow-2xl animate-in fade-in zoom-in duration-300">
               {error}
@@ -265,7 +326,6 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* Floating Input Area */}
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-[#171717] via-[#171717] to-transparent pt-12 pb-6 px-4">
             <div className="max-w-3xl mx-auto relative">
               {isLoading && (
